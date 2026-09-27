@@ -1,0 +1,12 @@
+controller:
+  nodeSelector:
+    node-role.kubernetes.io/worker: ""
+
+node:
+  nodeSelector:
+    node-role.kubernetes.io/worker: ""
+  enableWindows: false
+
+helmTester:
+  enabled: false
+  
