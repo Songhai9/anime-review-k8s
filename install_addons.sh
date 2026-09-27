@@ -55,3 +55,18 @@ echo "==> Add-ons installed successfully"
 
 helm list -n kube-system
 helm list -n ingress-nginx
+
+echo "==> Installing metrics-server"
+
+helm repo add metrics-server \
+  https://kubernetes-sigs.github.io/metrics-server/ \
+  --force-update
+
+helm repo update
+
+helm upgrade --install metrics-server \
+  metrics-server/metrics-server \
+  --version 3.14.0 \
+  --namespace kube-system \
+  --wait \
+  --timeout 5m

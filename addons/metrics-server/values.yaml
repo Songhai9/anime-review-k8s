@@ -1,0 +1,5 @@
+args:
+  - --kubelet-insecure-tls
+
+nodeSelector:
+  node-role.kubernetes.io/worker: ""
