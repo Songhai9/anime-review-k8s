@@ -52,7 +52,7 @@ spec:
               key: POSTGRES_PASSWORD
   volumeClaimTemplates:
   - metadata:
-    name: gp3-pvc
+      name: gp3-pvc
     spec:
       accessModes:
         - ReadWriteOnce
