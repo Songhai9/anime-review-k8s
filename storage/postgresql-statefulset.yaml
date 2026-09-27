@@ -6,7 +6,7 @@ metadata:
     tier: db
 spec:
   ports:
-  - port: 3306
+  - port: 5432
     name: db
   clusterIP: None
   selector:
@@ -23,7 +23,7 @@ spec:
     matchLabels:
       tier: db # has to match .spec.template.metadata.labels
   serviceName: "postgres"
-  replicas: 2 # by default is 1
+  replicas: 1 # by default is 1
   minReadySeconds: 10 # by default is 0
   template:
     metadata:
@@ -35,7 +35,7 @@ spec:
       - name: postgres
         image: postgres:16-alpine
         ports:
-        - containerPort: 3306
+        - containerPort: 5432
           name: db
         volumeMounts:
         - name: gp3-pvc
@@ -51,12 +51,12 @@ spec:
               name: postgres-secrets
               key: POSTGRES_PASSWORD
   volumeClaimTemplates:
-  metadata:
-  name: gp3-pvc
-  spec:
-    accessModes:
-      - ReadWriteOnce
-    resources:
-      requests:
-        storage: 8Gi
-    storageClassName: gp3
+  - metadata:
+    name: gp3-pvc
+    spec:
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 8Gi
+      storageClassName: gp3
