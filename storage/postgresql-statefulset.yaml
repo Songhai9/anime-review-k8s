@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: postgres
+  name: postgres-headless
   labels:
     tier: db
 spec:
@@ -21,14 +21,14 @@ metadata:
 spec:
   selector:
     matchLabels:
-      tier: db # has to match .spec.template.metadata.labels
-  serviceName: "postgres"
-  replicas: 1 # by default is 1
-  minReadySeconds: 10 # by default is 0
+      tier: db
+  serviceName: "postgres-headless"
+  replicas: 1 
+  minReadySeconds: 10 
   template:
     metadata:
       labels:
-        tier: db # has to match .spec.selector.matchLabels
+        tier: db
     spec:
       terminationGracePeriodSeconds: 10
       containers:
