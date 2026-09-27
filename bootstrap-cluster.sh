@@ -9,6 +9,8 @@ cd "$SCRIPT_DIR"
 
 ./install_addons.sh
 
+kubectl apply -f namespace/anime-review.yaml
+
 kubectl create secret generic postgres-secrets \
   --namespace anime-review \
   --from-literal=POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
@@ -18,12 +20,21 @@ kubectl apply -f storage/gp3-storageclass.yaml
 kubectl apply -f storage/postgresql-statefulset.yaml
 kubectl apply -f storage/postgres-service.yaml
 
-kubectl rollout status statefulset/postgres --timeout=180s
+kubectl rollout status statefulset/postgres \
+  -n anime-review \
+  --timeout=180s
+
 
 kubectl apply -f backend/
-kubectl rollout status deployment/backend-deployment --timeout=180s
+kubectl rollout status deployment/backend-deployment \
+  -n anime-review \
+  --timeout=180s
 
 kubectl apply -f frontend/
-kubectl rollout status deployment/frontend-deployment --timeout=180s
+kubectl rollout status deployment/frontend-deployment \
+  -n anime-review \
+  --timeout=180s
 
 kubectl apply -f ingress/
+
+kubectl apply -f networking/
