@@ -5,10 +5,12 @@ controller:
     nodePorts:
       http: 30080
       https: 30443
+  
+  replicaCount: 2
 
-spec:
-  replicas: 2
-
+  nodeSelector:
+    node-role.kubernetes.io/worker: ""
+  
   topologySpreadConstraints:
     - maxSkew: 1
       topologyKey: kubernetes.io/hostname
