@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+set -euo pipefail
+
 ./install_addons.sh
 kubectl apply -f storage/gp3-storageclass.yaml
 kubectl apply -f storage/postgresql-statefulset.yaml
