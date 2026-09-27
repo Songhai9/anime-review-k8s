@@ -4,6 +4,7 @@ set -euo pipefail
 
 EBS_CSI_CHART_VERSION="2.66.0"
 INGRESS_NGINX_CHART_VERSION="4.15.1"
+METRICS_SERVER_CHART_VERSION="3.14.0"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -51,11 +52,6 @@ helm upgrade --install ingress-nginx \
   --wait \
   --timeout 5m
 
-echo "==> Add-ons installed successfully"
-
-helm list -n kube-system
-helm list -n ingress-nginx
-
 echo "==> Installing metrics-server"
 
 helm repo add metrics-server \
@@ -66,7 +62,13 @@ helm repo update
 
 helm upgrade --install metrics-server \
   metrics-server/metrics-server \
-  --version 3.14.0 \
+  --version "$METRICS_SERVER_CHART_VERSION" \
   --namespace kube-system \
+  -f addons/metrics-server/values.yaml \
   --wait \
   --timeout 5m
+
+  echo "==> Add-ons installed successfully"
+
+helm list -n kube-system
+helm list -n ingress-nginx
