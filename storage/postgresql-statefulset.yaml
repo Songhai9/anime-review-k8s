@@ -40,6 +40,16 @@ spec:
         volumeMounts:
         - name: gp3-pvc
           mountPath: /var/lib/postgresql/data
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - pg_isready -U postgres_user
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
         env:
         - name: POSTGRES_DB 
           value: "postgres_db"
