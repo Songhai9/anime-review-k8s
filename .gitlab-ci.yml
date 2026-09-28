@@ -38,7 +38,7 @@ update_manifests:
       fi
 
     - git add frontend/frontend-deployment.yaml backend/backend-deployment.yaml
-    - git commit -m "CI/CD: update manifests for $IMAGE_TAG"
+    - git commit -m "CI/CD - update manifests for $IMAGE_TAG"
 
     - echo "DEPLOY_SHA=$(git rev-parse HEAD)" > deploy.env
 
