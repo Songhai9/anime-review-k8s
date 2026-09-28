@@ -110,3 +110,14 @@ deploy_cluster:
     - echo "Control Plane IP - $CONTROL_PLANE_IP"
     - git fetch origin "$DEPLOY_SHA"
     - git checkout --detach "$DEPLOY_SHA"
+
+    - chmod 600 "$K8S_SSH_KEY"
+
+    - |
+      ssh \
+        -i "$K8S_SSH_KEY" \
+        -o BatchMode=yes \
+        -o ConnectTimeout=10 \
+        -o StrictHostKeyChecking=accept-new \
+        ubuntu@"$BASTION_IP" \
+        'echo "SSH bastion OK"; hostname'
