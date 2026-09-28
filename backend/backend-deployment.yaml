@@ -5,8 +5,6 @@ metadata:
   namespace: anime-review
   labels:
     tier: backend
-  annotations:
-    ci-test: "direct-k8s-push"
 spec:
   replicas: 2
   selector:
