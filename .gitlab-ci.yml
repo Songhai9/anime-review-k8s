@@ -114,25 +114,46 @@ deploy_cluster:
     - git checkout --detach "$DEPLOY_SHA"
 
     - |
-      BACKEND_B64=$(base64 -w0 backend/backend-deployment.yaml)
-      FRONTEND_B64=$(base64 -w0 frontend/frontend-deployment.yaml)
+      MANIFESTS_B64=$(
+        tar -czf - \
+          namespace \
+          storage \
+          backend \
+          frontend \
+          ingress \
+          networking \
+        | base64 -w0
+      )
 
       COMMAND_ID=$(aws ssm send-command \
         --instance-ids "$CONTROL_PLANE_INSTANCE_ID" \
         --document-name "AWS-RunShellScript" \
         --parameters "{\"commands\":[
           \"set -e\",
-          \"echo '$BACKEND_B64' | base64 -d > /tmp/backend-deployment.yaml\",
-          \"/usr/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f /tmp/backend-deployment.yaml\",
+          \"rm -rf /tmp/anime-review-reconcile\",
+          \"mkdir -p /tmp/anime-review-reconcile\",
+          \"echo '$MANIFESTS_B64' | base64 -d | tar -xzf - -C /tmp/anime-review-reconcile\",
+
+          \"/usr/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f /tmp/anime-review-reconcile/namespace\",
+
+          \"/usr/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f /tmp/anime-review-reconcile/storage\",
+          \"/usr/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf rollout status statefulset/postgres -n anime-review --timeout=180s\",
+
+          \"/usr/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f /tmp/anime-review-reconcile/backend\",
           \"/usr/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf rollout status deployment/backend-deployment -n anime-review --timeout=180s\",
-          \"echo '$FRONTEND_B64' | base64 -d > /tmp/frontend-deployment.yaml\",
-          \"/usr/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f /tmp/frontend-deployment.yaml\",
-          \"/usr/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf rollout status deployment/frontend-deployment -n anime-review --timeout=180s\"
+
+          \"/usr/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f /tmp/anime-review-reconcile/frontend\",
+          \"/usr/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf rollout status deployment/frontend-deployment -n anime-review --timeout=180s\",
+
+          \"/usr/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f /tmp/anime-review-reconcile/ingress\",
+          \"/usr/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f /tmp/anime-review-reconcile/networking\",
+
+          \"rm -rf /tmp/anime-review-reconcile\"
         ]}" \
         --query 'Command.CommandId' \
         --output text)
 
-      echo "Deploy command - $COMMAND_ID"
+      echo "Reconcile command - $COMMAND_ID"
 
       WAIT_FAILED=0
 
