@@ -61,9 +61,11 @@ deploy_cluster:
   needs:
     - job: update_manifests
       artifacts: true
+      optional: true
 
   rules:
     - if: '$CI_PIPELINE_SOURCE == "pipeline" && $IMAGE_TAG'
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"'
 
   image:
     name: registry.gitlab.com/gitlab-org/cloud-deploy/aws-base:latest
@@ -105,6 +107,7 @@ deploy_cluster:
 
       echo "Control plane instance - $CONTROL_PLANE_INSTANCE_ID"
 
+    - - DEPLOY_SHA="${DEPLOY_SHA:-$CI_COMMIT_SHA}"
     - echo "Deploy SHA - $DEPLOY_SHA"
 
     - git fetch origin main
