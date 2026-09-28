@@ -65,6 +65,9 @@ deploy_cluster:
   id_tokens:
     GITLAB_OIDC_TOKEN:
       aud: sts.amazonaws.com
+  variables:
+    AWS_REGION: "eu-north-1"
+    AWS_DEFAULT_REGION: "eu-north-1"
 
   script:
     - |
