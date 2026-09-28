@@ -57,6 +57,9 @@ update_manifests:
 
 deploy_cluster:
   stage: deploy
+  needs:
+  - job: update_manifests
+    artifacts: true
 
   image:
     name: registry.gitlab.com/gitlab-org/cloud-deploy/aws-base:latest
@@ -101,3 +104,5 @@ deploy_cluster:
     
     - echo "Bastion IP - $BASTION_IP"
     - echo "Control Plane IP - $CONTROL_PLANE_IP"
+    - git fetch origin "$DEPLOY_SHA"
+    - git checkout --detach "$DEPLOY_SHA"
