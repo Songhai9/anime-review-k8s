@@ -79,3 +79,22 @@ deploy_cluster:
     - export $(printf "AWS_ACCESS_KEY_ID=%s AWS_SECRET_ACCESS_KEY=%s AWS_SESSION_TOKEN=%s" $aws_sts_output)
 
     - aws sts get-caller-identity
+
+    - |
+      BASTION_IP=$(aws ec2 describe-instances \
+        --filters \
+          "Name=tag:Name,Values=anime-review-bastion" \
+          "Name=instance-state-name,Values=running" \
+        --query 'Reservations[0].Instances[0].PublicIpAddress' \
+        --output text)
+
+    - |
+      CONTROL_PLANE_IP=$(aws ec2 describe-instances \
+        --filters \
+          "Name=tag:Name,Values=anime-review-control-plane" \
+          "Name=instance-state-name,Values=running" \
+        --query 'Reservations[0].Instances[0].PrivateIpAddress' \
+        --output text)
+    
+    - echo "Bastion IP - $BASTION_IP"
+    - echo "Control Plane IP - $CONTROL_PLANE_IP"
