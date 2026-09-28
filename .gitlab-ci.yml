@@ -111,14 +111,19 @@ deploy_cluster:
     - git checkout --detach "$DEPLOY_SHA"
 
     - |
+      BACKEND_B64=$(base64 -w0 backend/backend-deployment.yaml)
+
       COMMAND_ID=$(aws ssm send-command \
         --instance-ids "$CONTROL_PLANE_INSTANCE_ID" \
         --document-name "AWS-RunShellScript" \
-        --parameters 'commands=["/usr/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf get nodes"]' \
+        --parameters "{\"commands\":[
+          \"echo '$BACKEND_B64' | base64 -d > /tmp/backend-deployment.yaml\",
+          \"/usr/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf apply --dry-run=server -f /tmp/backend-deployment.yaml\"
+        ]}" \
         --query 'Command.CommandId' \
         --output text)
 
-      echo "SSM command - $COMMAND_ID"
+      echo "Manifest dry-run command - $COMMAND_ID"
 
       aws ssm wait command-executed \
         --command-id "$COMMAND_ID" \
@@ -133,10 +138,3 @@ deploy_cluster:
           Stdout:StandardOutputContent,
           Stderr:StandardErrorContent
         }'
-    
-    - |
-      BACKEND_B64=$(base64 -w 0 backend/backend-deployment.yaml)
-      aws ssm send-command \
-        --instance-ids "$CONTROL_PLANE_INSTANCE_ID" \
-        --document-name "AWS-RunShellScript" \
-        --parameters 'commands=["echo $BACKEND_B64 | base64 -d > /tmp/backend-deployment.yaml", "/usr/bin/kubectl --dry-run=server --kubeconfig /etc/kubernetes/admin.conf apply -f /tmp/backend-deployment.yaml"]'
