@@ -2,6 +2,9 @@
 
 set -euo pipefail
 
+export KUBECONFIG="${KUBECONFIG:-/etc/kubernetes/admin.conf}"
+export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"
+
 EBS_CSI_CHART_VERSION="2.66.0"
 INGRESS_NGINX_CHART_VERSION="4.15.1"
 METRICS_SERVER_CHART_VERSION="3.14.0"

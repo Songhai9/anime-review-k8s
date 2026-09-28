@@ -2,6 +2,12 @@
 
 set -euo pipefail
 
+export KUBECONFIG="${KUBECONFIG:-/etc/kubernetes/admin.conf}"
+export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"
+
+AWS_REGION="${AWS_REGION:-eu-north-1}"
+POSTGRES_PASSWORD_PARAMETER="${POSTGRES_PASSWORD_PARAMETER:-/anime-review/postgres/password}"
+
 POSTGRES_PASSWORD="$(
   aws ssm get-parameter \
     --name "/anime-review/postgres/password" \
