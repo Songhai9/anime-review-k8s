@@ -58,6 +58,10 @@ update_manifests:
 deploy_cluster:
   stage: deploy
 
+  image:
+    name: amazon/aws-cli:2
+    entrypoint: [""]
+
   id_tokens:
     GITLAB_OIDC_TOKEN:
       aud: sts.amazonaws.com
