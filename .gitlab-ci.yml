@@ -59,7 +59,7 @@ deploy_cluster:
   stage: deploy
 
   image:
-    name: public.ecr.aws/aws-cli/aws-cli:2.27.41
+    name: registry.gitlab.com/gitlab-org/cloud-deploy/aws-base:latest
     entrypoint: [""]
 
   id_tokens:
