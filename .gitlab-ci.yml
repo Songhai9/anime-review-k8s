@@ -135,7 +135,7 @@ deploy_cluster:
         }'
     
     - |
-      BACKEND_B64 = $(base64 -w 0 backend/backend-deployment.yaml)
+      BACKEND_B64=$(base64 -w 0 backend/backend-deployment.yaml)
       aws ssm send-command \
         --instance-ids "$CONTROL_PLANE_INSTANCE_ID" \
         --document-name "AWS-RunShellScript" \
