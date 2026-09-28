@@ -16,31 +16,31 @@ spec:
         tier: frontend
     spec:
       containers:
-      - name: anilist-frontend
-        image: registry.gitlab.com/songhai9/manga-app/frontend:acb7c59d
-        resources:
-          limits:
-            cpu: "200m"
-            memory: "128Mi"
-          requests:
-            cpu: "50m"
-            memory: "64Mi"
-        ports:
-        - containerPort: 3000
-        env:
-        - name: API_URL
-          value: http://backend:3001
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 3000
-          initialDelaySeconds: 10
-          periodSeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 3000
-          initialDelaySeconds: 5
-          periodSeconds: 5
-          timeoutSeconds: 3
-          failureThreshold: 3
+        - name: anilist-frontend
+          image: registry.gitlab.com/songhai9/manga-app/frontend:b815ea6a
+          resources:
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+          ports:
+            - containerPort: 3000
+          env:
+            - name: API_URL
+              value: http://backend:3001
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
