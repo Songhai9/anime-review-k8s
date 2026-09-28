@@ -133,3 +133,10 @@ deploy_cluster:
           Stdout:StandardOutputContent,
           Stderr:StandardErrorContent
         }'
+    
+    - |
+      BACKEND_B64 = $(base64 -w 0 backend/backend-deployment.yaml)
+      aws ssm send-command \
+        --instance-ids "$CONTROL_PLANE_INSTANCE_ID" \
+        --document-name "AWS-RunShellScript" \
+        --parameters 'commands=["echo $BACKEND_B64 | base64 -d > /tmp/backend-deployment.yaml", "/usr/bin/kubectl --dry-run=server --kubeconfig /etc/kubernetes/admin.conf apply -f /tmp/backend-deployment.yaml"]'
