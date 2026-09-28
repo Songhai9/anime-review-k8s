@@ -53,3 +53,25 @@ update_manifests:
   artifacts:
     reports:
       dotenv: deploy.env
+
+
+deploy_cluster:
+  stage: deploy
+
+  id_tokens:
+    GITLAB_OIDC_TOKEN:
+      aud: sts.amazonaws.com
+
+  script:
+    - |
+      aws_sts_output=$(aws sts assume-role-with-web-identity \
+        --role-arn "$AWS_ROLE_ARN" \
+        --role-session-name "GitLabRunner-${CI_PROJECT_ID}-${CI_PIPELINE_ID}" \
+        --web-identity-token "$GITLAB_OIDC_TOKEN" \
+        --duration-seconds 3600 \
+        --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
+        --output text)
+
+    - export $(printf "AWS_ACCESS_KEY_ID=%s AWS_SECRET_ACCESS_KEY=%s AWS_SESSION_TOKEN=%s" $aws_sts_output)
+
+    - aws sts get-caller-identity
