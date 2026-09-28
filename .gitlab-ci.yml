@@ -71,6 +71,10 @@ deploy_cluster:
   variables:
     AWS_REGION: "eu-north-1"
     AWS_DEFAULT_REGION: "eu-north-1"
+  
+  before_script:
+    - apt-get update
+    - apt-get install -y git openssh-client
 
   script:
     - |
