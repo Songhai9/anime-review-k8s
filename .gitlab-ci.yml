@@ -59,7 +59,7 @@ deploy_cluster:
   stage: deploy
 
   image:
-    name: amazon/aws-cli:2
+    name: public.ecr.aws/aws-cli/aws-cli:2.27.41
     entrypoint: [""]
 
   id_tokens:
