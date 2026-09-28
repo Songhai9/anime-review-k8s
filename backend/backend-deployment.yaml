@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: anilist-backend
-          image: registry.gitlab.com/songhai9/manga-app/backend:21d3c46f
+          image: registry.gitlab.com/songhai9/manga-app/backend:b0c47724
           resources:
             limits:
               cpu: "300m"
