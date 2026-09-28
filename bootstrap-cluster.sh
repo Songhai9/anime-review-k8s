@@ -2,7 +2,19 @@
 
 set -euo pipefail
 
-: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}"
+POSTGRES_PASSWORD="$(
+  aws ssm get-parameter \
+    --name "/anime-review/postgres/password" \
+    --with-decryption \
+    --query 'Parameter.Value' \
+    --output text \
+    --region eu-north-1
+)"
+
+if [[ -z "$POSTGRES_PASSWORD" ]]; then
+  echo "Unable to retrieve PostgreSQL password"
+  exit 1
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
