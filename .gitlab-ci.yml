@@ -8,6 +8,8 @@ update_manifests:
   image:
     name: mikefarah/yq:4
     entrypoint: [""]
+    docker:
+      user: "0"
 
   rules:
     - if: '$CI_PIPELINE_SOURCE == "pipeline" && $IMAGE_TAG'
