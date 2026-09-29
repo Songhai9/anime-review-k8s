@@ -2,7 +2,17 @@
 
 set -euo pipefail
 
-export KUBECONFIG="${KUBECONFIG:-/etc/kubernetes/admin.conf}"
+if [[ -z "${KUBECONFIG:-}" ]]; then
+  if [[ -r /etc/kubernetes/admin.conf ]]; then
+    export KUBECONFIG=/etc/kubernetes/admin.conf
+  elif [[ -r "$HOME/.kube/config" ]]; then
+    export KUBECONFIG="$HOME/.kube/config"
+  else
+    echo "No readable Kubernetes kubeconfig found"
+    exit 1
+  fi
+fi
+
 export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"
 
 POSTGRES_PASSWORD="$(

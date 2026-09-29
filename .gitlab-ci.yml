@@ -29,24 +29,27 @@ update_manifests:
 
     - |
       yq -i \
-        '.spec.template.spec.containers[0].image = strenv(FRONTEND_IMAGE)' \
-        frontend/frontend-deployment.yaml
+        '.backend.image.tag = strenv(IMAGE_TAG)' \
+        charts/anime-review/values.yaml
 
     - |
       yq -i \
-        '.spec.template.spec.containers[0].image = strenv(BACKEND_IMAGE)' \
-        backend/backend-deployment.yaml
+        '.frontend.image.tag = strenv(IMAGE_TAG)' \
+        charts/anime-review/values.yaml
 
     - git diff
+
+    # Important : le dotenv doit exister même s'il n'y a aucun diff.
     - echo "DEPLOY_SHA=$(git rev-parse HEAD)" > deploy.env
+
     - |
       if git diff --quiet; then
-        echo "Manifests already use $IMAGE_TAG"
+        echo "Helm values already use image tag $IMAGE_TAG"
         exit 0
       fi
 
-    - git add frontend/frontend-deployment.yaml backend/backend-deployment.yaml
-    - git commit -m "CI/CD - update manifests for $IMAGE_TAG"
+    - git add charts/anime-review/values.yaml
+    - git commit -m "CI/CD - update Helm values for $IMAGE_TAG"
 
     - echo "DEPLOY_SHA=$(git rev-parse HEAD)" > deploy.env
 
