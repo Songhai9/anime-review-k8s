@@ -1,0 +1,97 @@
+{{- if .Values.networkPolicies.enabled }}
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: {{ .Release.Namespace }}
+
+spec:
+  podSelector: {}
+
+  policyTypes:
+    - Ingress
+
+---
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-network-policy
+  namespace: {{ .Release.Namespace }}
+
+spec:
+  podSelector:
+    matchLabels:
+      tier: backend
+
+  policyTypes:
+    - Ingress
+
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              tier: frontend
+
+      ports:
+        - protocol: TCP
+          port: {{ .Values.backend.service.port }}
+
+---
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-network-policy
+  namespace: {{ .Release.Namespace }}
+
+spec:
+  podSelector:
+    matchLabels:
+      tier: frontend
+
+  policyTypes:
+    - Ingress
+
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+
+      ports:
+        - protocol: TCP
+          port: {{ .Values.frontend.service.port }}
+
+---
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: database-network-policy
+  namespace: {{ .Release.Namespace }}
+
+spec:
+  podSelector:
+    matchLabels:
+      tier: db
+
+  policyTypes:
+    - Ingress
+
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              tier: backend
+
+      ports:
+        - protocol: TCP
+          port: {{ .Values.postgres.service.port }}
+
+{{- end }}

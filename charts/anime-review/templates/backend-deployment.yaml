@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-deployment
+  namespace: {{ .Release.Namespace }}
+  labels:
+    tier: backend
+
+spec:
+  replicas: {{ .Values.backend.replicaCount }}
+
+  selector:
+    matchLabels:
+      tier: backend
+
+  template:
+    metadata:
+      labels:
+        tier: backend
+
+    spec:
+      containers:
+        - name: anilist-backend
+
+          image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}
+
+          ports:
+            - containerPort: {{ .Values.backend.service.port }}
+
+          env:
+            - name: DATABASE_HOST
+              value: {{ .Values.backend.database.host | quote }}
+
+            - name: DATABASE_PORT
+              value: {{ .Values.backend.database.port | quote }}
+
+            - name: DATABASE_NAME
+              value: {{ .Values.backend.database.name | quote }}
+
+            - name: DATABASE_USER
+              value: {{ .Values.backend.database.user | quote }}
+
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.backend.database.secretName }}
+                  key: {{ .Values.backend.database.secretKey }}
+
+            - name: DATABASE_SSL
+              value: "false"
+
+            - name: DATABASE_SEED
+              value: "false"
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.backend.service.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: {{ .Values.backend.service.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
