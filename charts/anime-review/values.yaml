@@ -1,14 +1,11 @@
 backend:
   replicaCount: 2
-
   image:
     repository: registry.gitlab.com/songhai9/manga-app/backend
-    tag: "204a33c5"
+    tag: "d3c73e56"
     pullPolicy: IfNotPresent
-
   service:
     port: 3001
-
   resources:
     requests:
       cpu: 100m
@@ -16,7 +13,6 @@ backend:
     limits:
       cpu: 300m
       memory: 256Mi
-
   database:
     host: postgres
     port: "5432"
@@ -24,19 +20,14 @@ backend:
     user: postgres_user
     secretName: postgres-secrets
     secretKey: POSTGRES_PASSWORD
-
-
 frontend:
   replicaCount: 1
-
   image:
     repository: registry.gitlab.com/songhai9/manga-app/frontend
-    tag: "204a33c5"
+    tag: "d3c73e56"
     pullPolicy: IfNotPresent
-
   service:
     port: 3000
-
   resources:
     requests:
       cpu: 50m
@@ -44,27 +35,20 @@ frontend:
     limits:
       cpu: 200m
       memory: 128Mi
-
-
 postgres:
   image:
     repository: postgres
     tag: "16-alpine"
     pullPolicy: IfNotPresent
-
   database: postgres_db
   user: postgres_user
-
   service:
     port: 5432
-
   secretName: postgres-secrets
   secretKey: POSTGRES_PASSWORD
-
   storage:
     storageClass: gp3
     size: 8Gi
-
   resources:
     requests:
       cpu: 100m
@@ -72,12 +56,8 @@ postgres:
     limits:
       cpu: 500m
       memory: 512Mi
-
-
 ingress:
   enabled: true
   className: nginx
-
-
 networkPolicies:
   enabled: true
