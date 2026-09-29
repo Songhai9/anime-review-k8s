@@ -5,9 +5,6 @@ set -euo pipefail
 export KUBECONFIG="${KUBECONFIG:-/etc/kubernetes/admin.conf}"
 export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"
 
-AWS_REGION="${AWS_REGION:-eu-north-1}"
-POSTGRES_PASSWORD_PARAMETER="${POSTGRES_PASSWORD_PARAMETER:-/anime-review/postgres/password}"
-
 POSTGRES_PASSWORD="$(
   aws ssm get-parameter \
     --name "/anime-review/postgres/password" \
@@ -25,34 +22,34 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+echo "==> Installing cluster add-ons"
 ./install_addons.sh
 
+echo "==> Creating application namespace"
 kubectl apply -f namespace/anime-review.yaml
 
+echo "==> Configuring PostgreSQL secret"
 kubectl create secret generic postgres-secrets \
   --namespace anime-review \
   --from-literal=POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
-  --dry-run=client -o yaml | kubectl apply -f -
+  --dry-run=client \
+  -o yaml \
+  | kubectl apply -f -
 
+echo "==> Configuring cluster storage"
 kubectl apply -f storage/gp3-storageclass.yaml
-kubectl apply -f storage/postgresql-statefulset.yaml
-kubectl apply -f storage/postgres-service.yaml
 
-kubectl rollout status statefulset/postgres \
-  -n anime-review \
-  --timeout=180s
+echo "==> Deploying Anime Review Helm release"
+helm upgrade --install anime-review \
+  ./charts/anime-review \
+  --namespace anime-review \
+  --server-side=true \
+  --wait \
+  --atomic \
+  --timeout 5m
 
+echo "==> Helm release status"
+helm status anime-review \
+  --namespace anime-review
 
-kubectl apply -f backend/
-kubectl rollout status deployment/backend-deployment \
-  -n anime-review \
-  --timeout=180s
-
-kubectl apply -f frontend/
-kubectl rollout status deployment/frontend-deployment \
-  -n anime-review \
-  --timeout=180s
-
-kubectl apply -f ingress/
-
-kubectl apply -f networking/
+echo "==> Application bootstrap completed successfully"
