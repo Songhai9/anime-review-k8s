@@ -1,8 +1,8 @@
 backend:
   replicaCount: 2
   image:
-    repository: registry.gitlab.com/songhai9/manga-app/backend
-    tag: "d3c73e56"
+    repository: ghcr.io/songhai9/anime-review-backend
+    tag: "fcd54c6e"
     pullPolicy: IfNotPresent
   service:
     port: 3001
@@ -23,8 +23,8 @@ backend:
 frontend:
   replicaCount: 1
   image:
-    repository: registry.gitlab.com/songhai9/manga-app/frontend
-    tag: "d3c73e56"
+    repository: ghcr.io/songhai9/anime-review-frontend
+    tag: "fcd54c6e"
     pullPolicy: IfNotPresent
   service:
     port: 3000
