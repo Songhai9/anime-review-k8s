@@ -1,0 +1,348 @@
+name: Kubernetes CD
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Docker image tag
+        required: false
+        type: string
+        default: ""
+
+      backend_repository:
+        description: Backend image repository
+        required: false
+        type: string
+        default: ""
+
+      frontend_repository:
+        description: Frontend image repository
+        required: false
+        type: string
+        default: ""
+
+      bootstrap_cluster:
+        description: Bootstrap a freshly configured cluster
+        required: false
+        type: boolean
+        default: false
+
+  push:
+    branches:
+      - main
+    paths:
+      - "charts/**"
+      - "bootstrap-cluster.sh"
+      - "install_addons.sh"
+      - "namespace/**"
+      - "storage/**"
+      - ".github/workflows/deploy.yml"
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: anime-review-cluster
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  AWS_DEFAULT_REGION: ${{ vars.AWS_REGION }}
+  K8S_TRANSFER_BUCKET: ${{ vars.K8S_TRANSFER_BUCKET }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Sync latest main
+        run: |
+          set -euo pipefail
+
+          git fetch origin main
+          git checkout -B main origin/main
+
+      - name: Install yq
+        run: |
+          sudo wget -q \
+            https://github.com/mikefarah/yq/releases/download/v4.53.6/yq_linux_amd64 \
+            -O /usr/local/bin/yq
+
+          sudo chmod +x /usr/local/bin/yq
+
+          yq --version
+
+      - name: Update Helm desired state
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          BACKEND_REPOSITORY: ${{ inputs.backend_repository }}
+          FRONTEND_REPOSITORY: ${{ inputs.frontend_repository }}
+        run: |
+          set -euo pipefail
+
+          if [[ -n "${IMAGE_TAG}" ]]; then
+
+            : "${BACKEND_REPOSITORY:?Missing backend_repository}"
+            : "${FRONTEND_REPOSITORY:?Missing frontend_repository}"
+
+            export IMAGE_TAG
+            export BACKEND_REPOSITORY
+            export FRONTEND_REPOSITORY
+
+            yq -i \
+              '.backend.image.repository = strenv(BACKEND_REPOSITORY) |
+               .backend.image.tag = strenv(IMAGE_TAG)' \
+              charts/anime-review/values.yaml
+
+            yq -i \
+              '.frontend.image.repository = strenv(FRONTEND_REPOSITORY) |
+               .frontend.image.tag = strenv(IMAGE_TAG)' \
+              charts/anime-review/values.yaml
+
+            git diff
+
+            if ! git diff --quiet; then
+              git config user.name "github-actions[bot]"
+              git config user.email \
+                "41898282+github-actions[bot]@users.noreply.github.com"
+
+              git add charts/anime-review/values.yaml
+
+              git commit \
+                -m "CI/CD - update Helm values for ${IMAGE_TAG}"
+
+              git push origin HEAD:main
+            fi
+          fi
+
+          echo "DEPLOY_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-session-name: GitHubActions-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Verify AWS identity
+        run: aws sts get-caller-identity
+
+      - name: Deploy through SSM
+        env:
+          BOOTSTRAP_CLUSTER: ${{ inputs.bootstrap_cluster }}
+        run: |
+          set -euo pipefail
+
+          echo "==> Discovering control plane"
+
+          CONTROL_PLANE_INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters \
+              "Name=tag:Name,Values=anime-review-control-plane" \
+              "Name=instance-state-name,Values=running" \
+            --query 'Reservations[0].Instances[0].InstanceId' \
+            --output text)
+
+          if [[ -z "$CONTROL_PLANE_INSTANCE_ID" ]] || \
+             [[ "$CONTROL_PLANE_INSTANCE_ID" == "None" ]]; then
+            echo "Unable to find running Kubernetes control plane"
+            exit 1
+          fi
+
+          echo "Control plane: $CONTROL_PLANE_INSTANCE_ID"
+          echo "Deploy SHA: $DEPLOY_SHA"
+
+          S3_KEY="k8s-bootstrap/github/${GITHUB_RUN_ID}/${DEPLOY_SHA}.tar.gz"
+
+          if [[ "${BOOTSTRAP_CLUSTER:-false}" == "true" ]]; then
+
+            echo "==> Packaging full Kubernetes bootstrap"
+
+            ARCHIVE="/tmp/anime-review-k8s-${DEPLOY_SHA}.tar.gz"
+
+            tar \
+              --exclude=.git \
+              -czf "$ARCHIVE" \
+              .
+
+            REMOTE_SCRIPT=$(cat <<EOF
+          set -euo pipefail
+
+          export KUBECONFIG=/etc/kubernetes/admin.conf
+          export PATH=/usr/local/bin:/usr/bin:/bin:\$PATH
+
+          DEPLOY_DIR="/tmp/anime-review-bootstrap-${DEPLOY_SHA}"
+          ARCHIVE="/tmp/anime-review-k8s-${DEPLOY_SHA}.tar.gz"
+
+          rm -rf "\$DEPLOY_DIR"
+          mkdir -p "\$DEPLOY_DIR"
+
+          /usr/local/bin/aws s3 cp \
+            "s3://${K8S_TRANSFER_BUCKET}/${S3_KEY}" \
+            "\$ARCHIVE" \
+            --region "${AWS_REGION}"
+
+          tar -xzf "\$ARCHIVE" \
+            -C "\$DEPLOY_DIR"
+
+          chmod +x \
+            "\$DEPLOY_DIR/bootstrap-cluster.sh" \
+            "\$DEPLOY_DIR/install_addons.sh"
+
+          cd "\$DEPLOY_DIR"
+
+          ./bootstrap-cluster.sh
+
+          rm -rf "\$DEPLOY_DIR"
+          rm -f "\$ARCHIVE"
+          EOF
+            )
+
+          else
+
+            echo "==> Packaging Helm chart"
+
+            ARCHIVE="/tmp/anime-review-chart-${DEPLOY_SHA}.tar.gz"
+
+            tar \
+              -czf "$ARCHIVE" \
+              -C charts \
+              anime-review
+
+            REMOTE_SCRIPT=$(cat <<EOF
+          set -euo pipefail
+
+          export KUBECONFIG=/etc/kubernetes/admin.conf
+          export PATH=/usr/local/bin:/usr/bin:/bin:\$PATH
+
+          DEPLOY_DIR="/tmp/anime-review-helm-${DEPLOY_SHA}"
+          ARCHIVE="/tmp/anime-review-chart-${DEPLOY_SHA}.tar.gz"
+
+          rm -rf "\$DEPLOY_DIR"
+          mkdir -p "\$DEPLOY_DIR"
+
+          echo "Downloading Helm chart"
+
+          /usr/local/bin/aws s3 cp \
+            "s3://${K8S_TRANSFER_BUCKET}/${S3_KEY}" \
+            "\$ARCHIVE" \
+            --region "${AWS_REGION}"
+
+          echo "Extracting Helm chart"
+
+          tar -xzf "\$ARCHIVE" \
+            -C "\$DEPLOY_DIR"
+
+          echo "Linting Helm chart"
+
+          /usr/local/bin/helm lint \
+            "\$DEPLOY_DIR/anime-review"
+
+          echo "Deploying Helm release"
+
+          /usr/local/bin/helm upgrade --install anime-review \
+            "\$DEPLOY_DIR/anime-review" \
+            --namespace anime-review \
+            --server-side=true \
+            --wait \
+            --rollback-on-failure \
+            --timeout 5m
+
+          echo "Helm release status"
+
+          /usr/local/bin/helm status anime-review \
+            --namespace anime-review
+
+          rm -rf "\$DEPLOY_DIR"
+          rm -f "\$ARCHIVE"
+          EOF
+            )
+          fi
+
+          echo "==> Uploading temporary artifact"
+
+          aws s3 cp \
+            "$ARCHIVE" \
+            "s3://${K8S_TRANSFER_BUCKET}/${S3_KEY}"
+
+          cleanup() {
+            echo "==> Cleaning temporary S3 artifact"
+
+            aws s3 rm \
+              "s3://${K8S_TRANSFER_BUCKET}/${S3_KEY}" \
+              >/dev/null 2>&1 || true
+          }
+
+          trap cleanup EXIT
+
+          REMOTE_SCRIPT_B64=$(printf '%s' "$REMOTE_SCRIPT" | base64 -w0)
+
+          PARAMETERS=$(jq -n \
+            --arg command "echo '$REMOTE_SCRIPT_B64' | base64 -d | bash" \
+            '{commands: [$command]}')
+
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$CONTROL_PLANE_INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters "$PARAMETERS" \
+            --query 'Command.CommandId' \
+            --output text)
+
+          echo "SSM command: $COMMAND_ID"
+
+          for attempt in $(seq 1 90); do
+
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$CONTROL_PLANE_INSTANCE_ID" \
+              --query 'Status' \
+              --output text \
+              2>/dev/null || echo "Pending")
+
+            echo "SSM status: $STATUS"
+
+            case "$STATUS" in
+              Success)
+                break
+                ;;
+
+              Failed|Cancelled|TimedOut|Cancelling)
+                aws ssm get-command-invocation \
+                  --command-id "$COMMAND_ID" \
+                  --instance-id "$CONTROL_PLANE_INSTANCE_ID" \
+                  --query '{
+                    Status:Status,
+                    ExitCode:ResponseCode,
+                    Stdout:StandardOutputContent,
+                    Stderr:StandardErrorContent
+                  }'
+
+                exit 1
+                ;;
+            esac
+
+            if [[ "$attempt" -eq 90 ]]; then
+              echo "Timed out waiting for deployment"
+              exit 1
+            fi
+
+            sleep 5
+          done
+
+          aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$CONTROL_PLANE_INSTANCE_ID" \
+            --query '{
+              Status:Status,
+              ExitCode:ResponseCode,
+              Stdout:StandardOutputContent,
+              Stderr:StandardErrorContent
+            }'
+
+          echo "==> Deployment completed successfully"
