@@ -2,7 +2,7 @@ backend:
   replicaCount: 2
   image:
     repository: ghcr.io/songhai9/anime-review-backend
-    tag: "cab48152"
+    tag: "8251f5ff"
     pullPolicy: IfNotPresent
   service:
     port: 3001
@@ -24,7 +24,7 @@ frontend:
   replicaCount: 1
   image:
     repository: ghcr.io/songhai9/anime-review-frontend
-    tag: "cab48152"
+    tag: "8251f5ff"
     pullPolicy: IfNotPresent
   service:
     port: 3000
