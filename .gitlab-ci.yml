@@ -29,6 +29,18 @@ update_manifests:
 
     - |
       yq -i \
+        '.backend.image.repository = strenv(BACKEND_REPOSITORY) |
+        .backend.image.tag = strenv(IMAGE_TAG)' \
+        charts/anime-review/values.yaml
+
+    - |
+      yq -i \
+        '.frontend.image.repository = strenv(FRONTEND_REPOSITORY) |
+        .frontend.image.tag = strenv(IMAGE_TAG)' \
+        charts/anime-review/values.yaml
+
+    - |
+      yq -i \
         '.backend.image.tag = strenv(IMAGE_TAG)' \
         charts/anime-review/values.yaml
 

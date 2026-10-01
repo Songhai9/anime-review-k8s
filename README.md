@@ -1,235 +1,241 @@
-# Anime Review · Helm deployment on Kubernetes
+# Anime Review · Kubernetes delivery (Helm)
 
-This repository deploys the application as the **`anime-review` Helm release** on the AWS kubeadm cluster created by [anime-review-infra](https://github.com/Songhai9/anime-review-infra). [anime-review-app](https://github.com/Songhai9/anime-review-app) builds the frontend and backend images. The chart packages Deployments, Services, PostgreSQL, Ingress and NetworkPolicies into one versioned application definition.
+This repository installs the cluster add-ons and deploys the application as the **`anime-review` Helm release** on the private kubeadm cluster built by [anime-review-infra](https://github.com/Songhai9/anime-review-infra). Images come from [anime-review-app](https://github.com/Songhai9/anime-review-app). Every deployment is executed **on the control plane through AWS Systems Manager**: the cluster API is never exposed, and neither GitLab CI nor GitHub Actions holds a kubeconfig or an AWS key.
 
-![Kubernetes architecture](docs/assets/AWS-NLB.png)
+![Workloads inside the cluster](docs/assets/AWS-NLB.png)
 
-## Navigation
+<details>
+<summary><b>Detailed view</b> (every component, port and job)</summary>
 
-- [Chart ownership and configuration](#chart-ownership-and-configuration)
-- [Installation and delivery](#installation-and-delivery)
-- [CI/CD with S3 and SSM](#cicd-with-s3-and-ssm)
-- [Configuration, IAM and tokens](docs/CONFIGURATION.md)
-- [Operations, migration and rollback](docs/OPERATIONS.md)
+![Workloads inside the cluster · detailed](docs/assets/06-cluster-workloads-detailed.png)
 
-## Implemented features
+</details>
 
-- Local application chart at `charts/anime-review`, type `application`, chart version `0.1.0`, metadata `appVersion: 1.0.0`. The image tags in `values.yaml`, not `appVersion`, select executable code.
-- Two backend replicas and one frontend replica by default; configurable images, resource requests/limits, service ports and replica counts. Frontend requests reach the API server-side.
-- PostgreSQL 16 Alpine StatefulSet with one replica, a headless Service, application Service and an 8 GiB RWO gp3 claim. The external StorageClass has `WaitForFirstConsumer` and `Retain`.
-- Health/readiness probes and SQL credentials referenced from an existing Secret. PostgreSQL data is mounted below `PGDATA=/var/lib/postgresql/data/pgdata`.
-- Optional Ingress and optional ingress NetworkPolicies through values. Default traffic is ingress-nginx → frontend:3000 → backend:3001 → PostgreSQL:5432. Egress is not denied.
-- GitLab CI changes both image tags in chart values, commits the change, packages the exact Git revision, transfers it through S3 and runs Helm on the control plane through SSM.
-- A deployment resource group serializes jobs in this K8s project. Helm waits for readiness and requests rollback on upgrade failure.
+![Three repositories, three responsibilities](docs/assets/00-overview.png)
 
-## Chart ownership and configuration
+## Implemented DevOps features
 
-| Managed by the application release | Prepared separately |
+**Helm chart `charts/anime-review`** (chart `0.1.0`, 12 objects with default values)
+- `frontend-deployment` (1 replica, :3000) and `backend-deployment` (2 replicas, :3001), each with a ClusterIP Service, resource requests/limits, liveness `/health`, backend readiness `/ready` (runs `SELECT 1`).
+- PostgreSQL 16 `StatefulSet` with a headless Service, a ClusterIP Service and an 8 Gi `gp3` volume claim (RWO). Password read from the `postgres-secrets` Secret, never from values.
+- Ingress `anilist-ingress` (class `nginx`, `/` → `frontend:3000`).
+- Four NetworkPolicies enforced by Calico: default deny ingress, then only ingress-nginx → frontend :3000 → backend :3001 → database :5432.
+- Image tags, replicas, resources, ports, Ingress and policies are values; tags are the only thing CI changes.
+
+**Cluster add-ons** (`install_addons.sh`, pinned chart versions)
+- AWS EBS CSI driver `2.66.0` on the workers (uses the worker instance role through IMDSv2).
+- ingress-nginx `4.15.1`: 2 replicas on workers only, spread by hostname, NodePort 30080/30443 behind the AWS NLB.
+- metrics-server `3.14.0` (`kubectl top`).
+- `gp3` StorageClass: `WaitForFirstConsumer`, `reclaimPolicy: Retain`.
+
+**Secrets and bootstrap** (`bootstrap-cluster.sh`)
+- Reads `/anime-review/postgres/password` from SSM Parameter Store with the control-plane role and creates `postgres-secrets` idempotently (`--dry-run=client | kubectl apply`). The password never appears in Git or CI logs.
+
+**Continuous delivery** (GitLab CI `.gitlab-ci.yml` and GitHub Actions `deploy.yml`)
+- Triggered by the application pipeline (GitLab multi-project trigger or GitHub `workflow_dispatch`) with the image tag: `yq` pins the tag in `values.yaml`, commits and pushes to `main`, and passes the resulting `DEPLOY_SHA` through a dotenv artifact.
+- `deploy_cluster` assumes the `k8s-cd` role with OIDC, finds the control plane by tag, checks out the exact `DEPLOY_SHA`, uploads the chart archive to S3, runs `helm lint` + `helm upgrade --install --wait --rollback-on-failure` through `ssm send-command`, streams the result and deletes the S3 object.
+- Git is the source of truth: a push on `main` redeploys the current chart. `resource_group` serializes deployments.
+
+![Continuous delivery chain](docs/assets/05-delivery-chain.png)
+
+<details>
+<summary><b>Detailed view</b> (every component, port and job)</summary>
+
+![Continuous delivery chain · detailed](docs/assets/05-delivery-chain-detailed.png)
+
+</details>
+
+## Repository layout
+
+| Path | Content |
 |---|---|
-| Backend/frontend Deployments and Services | AWS infrastructure, kubeadm, Calico and Helm |
-| PostgreSQL StatefulSet and its two Services | EBS CSI, ingress-nginx and metrics-server releases |
-| Ingress when enabled | `anime-review` namespace |
-| Four NetworkPolicies when enabled | `postgres-secrets`, registry pull Secret/ServiceAccount |
-| PostgreSQL volume claim template | Cluster-scoped gp3 StorageClass |
+| `charts/anime-review/` | Helm chart (templates + `values.yaml`, the desired state) |
+| `addons/*/values.yaml` | Values for EBS CSI, ingress-nginx, metrics-server |
+| `install_addons.sh` | Installs/upgrades the three add-ons |
+| `bootstrap-cluster.sh` | Add-ons → namespace → Secret → StorageClass → Helm release |
+| `namespace/anime-review.yaml` | Namespace (outside the chart) |
+| `storage/gp3-storageclass.yaml` | StorageClass (cluster-scoped, outside the chart) |
+| `.gitlab-ci.yml` | GitLab CI: `update_manifests` + `deploy_cluster` |
+| `.github/workflows/deploy.yml` | GitHub Actions: same delivery + `bootstrap_cluster` path |
+| `docs/` | Configuration, operations, examples, diagrams |
 
-The chart renders **12 Kubernetes objects** with default values. Namespace, SQL Secret and StorageClass remain outside its ownership. Add-on chart versions remain in `install_addons.sh`: EBS CSI 2.66.0, ingress-nginx 4.15.1, metrics-server 3.14.0.
+`storage/postgres-secrets.yaml` is git-ignored on purpose: the real Secret is always generated from Parameter Store.
 
-Use `charts/anime-review/values.yaml` for the desired state consumed by CI. A supplied [override example](docs/examples/helm-values.yaml.example) illustrates the supported settings; it contains no password. There is no values schema or chart test hook in this revision. Resource names and tier labels are fixed, so this chart is not designed for multiple independent releases in the same namespace. Changing service ports does not automatically reconfigure Node or PostgreSQL listening ports; keep the implemented defaults unless the applications are changed too.
+## Before you deploy
 
-Helm reduces repeated YAML editing, versions release state and applies related resources together. Raw manifests are simpler for a small fixed installation, while Kustomize provides overlays without release management. Here Helm is useful because image versions, replicas and configuration are centralized and upgrades have release history. It does not add a continuously reconciling GitOps controller or roll back SQL data.
+| # | Prerequisite | Provided by |
+|---|---|---|
+| 1 | 3 `Ready` nodes, Calico, Helm 4 and AWS CLI on the control plane | [anime-review-infra](https://github.com/Songhai9/anime-review-infra) |
+| 2 | NLB forwarding 80/443 to NodePorts 30080/30443 | anime-review-infra |
+| 3 | SecureString `/anime-review/postgres/password` (eu-north-1) | you, once ([infra › BOOTSTRAP-AWS §6](https://github.com/Songhai9/anime-review-infra/blob/main/docs/BOOTSTRAP-AWS.md)) |
+| 4 | `k8s-cd` IAM role (output `k8s_cd_arn`) trusting this repository's `main` branch on GitLab and GitHub | anime-review-infra Terraform |
+| 5 | Transfer bucket with prefix `k8s-bootstrap/` readable by the control plane | infra `bootstrap/` + Terraform |
+| 6 | Backend and frontend images for **arm64**, same tag (GHCR or GitLab registry) | anime-review-app CI |
+| 7 | If the registry is private: a pull token (`read_registry` deploy token, or a GHCR token with `read:packages`) | GitLab / GitHub |
 
-## Installation and delivery
+### GitLab configuration of this project
 
-### 1. Gather prerequisites
+| Setting | Value |
+|---|---|
+| Variable `AWS_ROLE_ARN` (protected) | `terraform -chdir=terraform output -raw k8s_cd_arn` in the infra repo |
+| `K8S_TRANSFER_BUCKET`, `AWS_REGION` | edit in `.gitlab-ci.yml` if your names differ |
+| Job token permissions | allow **anime-review-app** (and anime-review-infra for bootstrap) to trigger pipelines |
+| Job token → *Allow Git push requests* | enabled, so `update_manifests` can push to `main` |
+| `charts/anime-review/values.yaml` | `backend.image.repository` / `frontend.image.repository` set to **your** registry paths |
 
-- Three Ready nodes, Calico, Helm 4, a reachable NLB and functioning AWS SSM access.
-- Published ARM64 backend/frontend images from the same application commit. The default tag `204a33c5` must be replaced if unavailable.
-- SecureString `/anime-review/postgres/password` in eu-north-1, readable/decryptable by the control-plane identity.
-- Private-registry credentials when images require authentication.
-- Cluster access through `/etc/kubernetes/admin.conf` on the control plane. CI additionally requires the transfer-bucket IAM permissions described in [CONFIGURATION](docs/CONFIGURATION.md).
+A checklist version is in [`docs/examples/gitlab-ci-variables.env.example`](docs/examples/gitlab-ci-variables.env.example).
 
+### GitHub Actions configuration of this repository
 
-### 2. Open a session and prepare tools
+| Setting | Value |
+|---|---|
+| Variables `AWS_ROLE_ARN`, `AWS_REGION`, `K8S_TRANSFER_BUCKET` | `k8s_cd_arn` output · `eu-north-1` · transfer bucket |
+| Workflow permissions | `contents: write` (values commit) and `id-token: write` (OIDC) are declared in `deploy.yml` |
+| Branch protection on `main` | must let `github-actions[bot]` push the values commit |
+| Callers | app and infra dispatch `deploy.yml` with their `K8S_WORKFLOW_TOKEN` secret |
 
-From the infra repository root on your workstation:
+Checklist: [`docs/examples/github-actions.env.example`](docs/examples/github-actions.env.example).
+
+## First installation (bootstrap)
+
+Prerequisite: the infra repository has finished its Ansible step (three `Ready` nodes, plus AWS CLI, kubectl and Helm on the control plane). `bootstrap-cluster.sh` must run **on the control plane** because it uses `/etc/kubernetes/admin.conf`, `aws`, `kubectl` and `helm`. It runs, in order:
+
+```
+install_addons.sh                          → EBS CSI, ingress-nginx, metrics-server
+namespace/anime-review.yaml                → namespace
+Parameter Store /anime-review/postgres/password → Secret postgres-secrets
+storage/gp3-storageclass.yaml              → StorageClass gp3
+helm upgrade --install anime-review        → PostgreSQL, backend, frontend, ingress, NetworkPolicies
+```
+
+There are three ways to get it there. None of them uses SSH.
+
+### Option A · From the pipeline (recommended)
+
+GitHub: *Actions → Kubernetes CD → Run workflow*, check `bootstrap_cluster` and leave `image_tag` empty. From a terminal:
 
 ```bash
-CONTROL_PLANE_ID=$(terraform -chdir=terraform output -raw control_plane_instance_id)
+gh workflow run deploy.yml -R Songhai9/anime-review-k8s -f bootstrap_cluster=true
+```
+
+The infra pipeline does the same thing automatically after a rebuild. GitLab currently has no job for `BOOTSTRAP_CLUSTER` (see [Continuous delivery](#continuous-delivery)).
+
+### Option B · From your workstation, same mechanism as the CI
+
+```bash
+. ~/.config/anime-review/operator.env        # AWS profile + ANSIBLE_SSM_BUCKET
+bash docs/examples/bootstrap-via-ssm.sh.example
+```
+
+The script ([`docs/examples/bootstrap-via-ssm.sh.example`](docs/examples/bootstrap-via-ssm.sh.example)) does the following:
+
+1. It reads the control-plane instance ID from `../anime-review-infra/terraform`.
+2. It archives this repository (without `.git`, including uncommitted changes) and uploads it to `s3://$ANSIBLE_SSM_BUCKET/k8s-bootstrap/local/<sha>.tar.gz`.
+3. It sends `AWS-RunShellScript` to the control plane. That script downloads and extracts the archive, exports `KUBECONFIG`, runs `bootstrap-cluster.sh` and cleans up.
+4. It polls the command, prints stdout/stderr and deletes the S3 object.
+
+This is the direct replacement for the old `scp` + `ssh`.
+
+### Option C · Interactive session (debugging)
+
+```bash
+CONTROL_PLANE_ID=$(terraform -chdir=../anime-review-infra/terraform output -raw control_plane_instance_id)
 aws ssm start-session --target "$CONTROL_PLANE_ID" --region eu-north-1
 ```
 
-Inside the remote machine's session:
+On the node, run `sudo -i` and `export KUBECONFIG=/etc/kubernetes/admin.conf`. Then get the repository (`git clone https://github.com/Songhai9/anime-review-k8s.git`, which goes out through the NAT) and run `./bootstrap-cluster.sh`.
+
+`bootstrap-cluster.sh` is idempotent. It still uses `helm … --atomic`, whereas the CI chart deployment uses `--rollback-on-failure`, the Helm 4 name. If your Helm build rejects `--atomic`, run the steps by hand:
 
 ```bash
-sudo -i
-export KUBECONFIG=/etc/kubernetes/admin.conf
-export AWS_REGION=eu-north-1
-export AWS_DEFAULT_REGION=eu-north-1
-kubectl get nodes -o wide
-helm version
-command -v aws
-```
-
-The current infrastructure playbook installs ARM64 AWS CLI v2 at `/usr/local/bin/aws` if absent. On an older cluster, install it before continuing. Helm must support the Helm 4 flags used below; check `helm version` and `helm upgrade --help`.
-
-Verify identity and parameter access without printing the secret:
-
-```bash
-aws sts get-caller-identity
-aws ssm get-parameter --name /anime-review/postgres/password \
-  --with-decryption --region eu-north-1 --query Parameter.Name --output text
-```
-
-The control-plane instance profile already includes Parameter Store access through `AmazonSSMManagedInstanceCore`. For access failures, also inspect KMS/SCP rules rather than automatically adding broad permissions. Do not copy permanent workstation AWS keys onto the VM.
-
-### 3. Retrieve the chart and set desired images
-
-On the control plane, in your administration directory:
-
-```bash
-git clone https://github.com/Songhai9/anime-review-k8s.git
-cd anime-review-k8s
-# Optional: reproduce the documented snapshot before making local edits.
-git checkout 0da79c681230ac9ff51b81abcd21c9d08ecdb7e0
-```
-
-Use your fork when appropriate. Edit both `backend.image` and `frontend.image` in `charts/anime-review/values.yaml`, keeping repository and tag separate and tags quoted as strings. For routine CI, commit the repository paths and other desired settings to GitLab: the update job changes **tags only**. It ignores the `BACKEND_IMAGE` and `FRONTEND_IMAGE` variables still forwarded by application CI.
-
-For a manual deployment, copy `docs/examples/helm-values.yaml.example` to a private operator directory, fill it in and pass it using `-f`. Neither bootstrap nor CI automatically reads that example. The procedure below uses the chart's edited default values to match CI behavior.
-
-```bash
-helm lint ./charts/anime-review
-helm template anime-review ./charts/anime-review \
-  --namespace anime-review > /tmp/anime-review-rendered.yaml
-```
-
-Inspect the rendered images, namespace, database settings and PVC template before cluster changes. Templates are not plain manifests: do not pass `charts/anime-review/templates` directly to `kubectl apply`.
-
-### 4. Private registry access
-
-Skip this step only if images are public and genuinely accessible anonymously. Otherwise, create the namespace, then the Secret, and associate it with the ServiceAccount used by pods:
-
-```bash
-kubectl apply -f namespace/anime-review.yaml
-read -r -p 'Deploy token username: ' REGISTRY_USER
-read -r -s -p 'read_registry deploy token: ' REGISTRY_PASSWORD
-printf '\n'
-kubectl create secret docker-registry gitlab-registry \
-  --namespace anime-review \
-  --docker-server=registry.gitlab.com \
-  --docker-username="$REGISTRY_USER" \
-  --docker-password="$REGISTRY_PASSWORD" \
-  --dry-run=client -o yaml | kubectl apply -f -
-unset REGISTRY_PASSWORD
-kubectl patch serviceaccount default -n anime-review \
-  --type=merge -p '{"imagePullSecrets":[{"name":"gitlab-registry"}]}'
-```
-
-The association applies to newly created pods using the default ServiceAccount. Recreate existing pods through a controlled rollout after fixing the configuration. This command replaces the `imagePullSecrets` list; preserve any other entries in an existing environment. The optional manifest under `docs/examples/` documents the same association; bootstrap does not load it automatically.
-
-### 5. Prepare external resources and install the release
-
-Run from the K8s repository root on the control plane. This expands bootstrap into explicit steps and replaces its incompatible Helm flag. If this cluster already runs the former raw manifests, follow [the migration procedure](docs/OPERATIONS.md#migrate-existing-raw-manifests) before installing Helm; do not delete the database to solve an ownership error.
-
-```bash
-set -euo pipefail
 bash ./install_addons.sh
 kubectl apply -f namespace/anime-review.yaml
-POSTGRES_PASSWORD=$(aws ssm get-parameter \
-  --name /anime-review/postgres/password --with-decryption \
-  --query Parameter.Value --output text --region eu-north-1)
-if [ -z "$POSTGRES_PASSWORD" ] || [ "$POSTGRES_PASSWORD" = None ]; then
-  echo "PostgreSQL password is missing" >&2
-  exit 1
-fi
 kubectl create secret generic postgres-secrets -n anime-review \
-  --from-literal=POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+  --from-literal=POSTGRES_PASSWORD="$(aws ssm get-parameter --name /anime-review/postgres/password \
+     --with-decryption --query Parameter.Value --output text --region eu-north-1)" \
   --dry-run=client -o yaml | kubectl apply -f -
-unset POSTGRES_PASSWORD
 kubectl apply -f storage/gp3-storageclass.yaml
-helm upgrade --install anime-review ./charts/anime-review \
-  --namespace anime-review --server-side=true \
-  --wait --rollback-on-failure --timeout 5m
-helm status anime-review --namespace anime-review
+helm upgrade --install anime-review ./charts/anime-review -n anime-review \
+  --server-side=true --wait --rollback-on-failure --timeout 5m
 ```
 
-Run command blocks in a shell that stops on errors (`set -euo pipefail`), and stop if retrieving the parameter fails. A Helm upgrade covers all chart resources, rather than applying backend and frontend sequentially. Readiness probes provide dependency gating. The surrounding add-on/Secret/StorageClass preparation is not one atomic transaction with the release. Updating the Secret does not rotate an existing PostgreSQL SQL role.
+### Private registry only · pull Secret
 
-### 6. Check networking, application and data
+If the images are not public, create the pull Secret once before the first release, from an SSM session (option C):
 
 ```bash
-kubectl get nodes -o wide
-helm list -n kube-system
-helm list -n ingress-nginx
-kubectl -n anime-review get pods,svc,ingress,pvc
-kubectl get pv
-kubectl -n anime-review get networkpolicy
-kubectl -n anime-review rollout status statefulset/postgres --timeout=180s
-kubectl -n anime-review rollout status deployment/backend-deployment --timeout=180s
-kubectl -n anime-review rollout status deployment/frontend-deployment --timeout=180s
+kubectl apply -f namespace/anime-review.yaml
+read -r -p 'Registry username: ' U; read -r -s -p 'Registry token: ' P; echo
+kubectl create secret docker-registry gitlab-registry -n anime-review \
+  --docker-server=registry.gitlab.com --docker-username="$U" --docker-password="$P" \
+  --dry-run=client -o yaml | kubectl apply -f -
+unset P
+kubectl apply -f docs/examples/registry-serviceaccount.yaml.example
 ```
 
-From the workstation, in the infra repository:
+### Verify end to end
+
+From an SSM session on the control plane (option C), with `KUBECONFIG=/etc/kubernetes/admin.conf`:
 
 ```bash
-NLB_DNS=$(terraform -chdir=terraform output -raw nlb_dns_name)
-curl --fail "http://$NLB_DNS/health"
+kubectl get nodes -o wide                       # 3 nodes Ready
+kubectl get pods -A                             # ingress-nginx, ebs-csi, metrics-server, calico Running
+helm status anime-review -n anime-review        # STATUS: deployed
+kubectl -n anime-review get pods,svc,ingress,pvc,networkpolicy
+kubectl -n anime-review rollout status deployment/backend-deployment
+kubectl -n anime-review rollout status deployment/frontend-deployment
+kubectl -n anime-review rollout status statefulset/postgres
 ```
 
-Open `http://NLB_DNS`, create a reader, add a title and save a review. This crosses NLB, Ingress, frontend, API and DB. The API has no dedicated public route. A 200 from frontend `/health` alone does not validate the entire path; also perform a functional write/read.
+From your workstation (infra repo): `curl --fail "http://$(terraform -chdir=terraform output -raw nlb_dns_name)/health"`, then open the site, create a reader and a review, reload. That path crosses NLB → ingress-nginx → frontend → backend → PostgreSQL.
 
-Allowed ingress is: selected ingress-nginx pods → frontend:3000; frontend → backend:3001; backend → DB:5432. Cluster DNS resolves Service names. These policies do not block outbound AniList or registry access.
+## Continuous delivery
 
-## CI/CD with S3 and SSM
+Two equivalent implementations: GitLab CI (`.gitlab-ci.yml`, jobs `update_manifests` + `deploy_cluster`) and GitHub Actions (`.github/workflows/deploy.yml`, one `deploy` job). Both serialize deployments (`resource_group` / `concurrency: anime-review-cluster`).
 
-![Helm delivery flow](docs/assets/04-cicd.svg)
-
-### Configure GitLab
-
-1. Set `AWS_ROLE_ARN` to the infra `k8s_cd_arn` output; trust must match the K8s project, `main` and audience `sts.amazonaws.com`.
-2. Set `K8S_TRANSFER_BUCKET` to the actual existing bucket. Align it with infra `k8s_transfer_bucket_name`; CI's default is project-specific.
-3. Allow the app project to trigger K8s and allow this K8s project's own job token to push to its protected branch as intended.
-4. Commit actual image repository paths in chart values. The app supplies `IMAGE_TAG`; the current K8s update job writes it to both tags.
-5. Complete initial namespace, secrets, storage and add-on preparation before routine delivery.
-
-| Trigger | Update job | Deployment job |
-|---|---|---|
-| Multi-project pipeline with nonempty `IMAGE_TAG` | Updates chart tags, commits if changed, emits `DEPLOY_SHA` | Deploys the selected commit |
-| Push to K8s `main` | Skipped | Deploys `CI_COMMIT_SHA` |
-| Infra pipeline with only `BOOTSTRAP_CLUSTER=true` | No matching rule | No matching rule |
-| UI/manual pipeline with no matching source rule | No matching rule | No matching rule |
-
-`BOOTSTRAP_CLUSTER` does not currently enable bootstrapping. Do not infer behavior from its name. The infra rebuild trigger needs corresponding downstream implementation before it provides an end-to-end fresh-cluster workflow.
-
-### Exact delivery sequence
+| Triggered by | What happens | GitLab CI | GitHub Actions |
+|---|---|---|---|
+| App pipeline with an image tag | pin tag (GitHub: also repository) with `yq`, commit, deploy that commit with Helm | ✅ `IMAGE_TAG` | ✅ `workflow_dispatch` inputs `image_tag`, `backend_repository`, `frontend_repository` |
+| Push to `main` touching the chart | deploy the pushed commit | ✅ any push | ✅ `charts/**`, scripts, `namespace/**`, `storage/**` |
+| Infra pipeline, fresh cluster | ship the whole repo and run `bootstrap-cluster.sh` via SSM | ❌ no job (see below) | ✅ input `bootstrap_cluster: true` |
 
 ```mermaid
 sequenceDiagram
-    participant A as Application CI
+    participant A as App CI
     participant K as K8s CI
-    participant G as GitLab repository
-    participant B as S3 transfer bucket
-    participant S as AWS SSM
-    participant C as Control plane / Helm
-    A->>K: IMAGE_TAG (same tag for both images)
-    K->>G: Commit charts/anime-review/values.yaml
-    K->>K: DEPLOY_SHA, OIDC credentials, exact checkout
-    K->>B: Upload chart tar.gz under k8s-bootstrap/helm
-    K->>S: Send encoded shell script
-    S->>C: Execute with admin kubeconfig
-    C->>B: Download using EC2 instance role
-    C->>C: helm lint, upgrade --install, wait
-    C->>C: Roll back failed upgrade when possible
-    S-->>K: Status and output
-    K->>B: Remove temporary artifact on exit
+    participant G as Git (this repo)
+    participant S as S3 transfer bucket
+    participant M as AWS SSM
+    participant C as Control plane
+    A->>K: trigger main + IMAGE_TAG
+    K->>G: yq tag → commit → push (DEPLOY_SHA)
+    K->>K: OIDC → k8s-cd role, checkout DEPLOY_SHA
+    K->>S: put chart tar.gz (k8s-bootstrap/helm/…)
+    K->>M: send-command AWS-RunShellScript
+    M->>C: run script as root
+    C->>S: get chart (instance role)
+    C->>C: helm lint · upgrade --install --wait --rollback-on-failure
+    K->>M: poll status (90 × 5 s)
+    K->>S: delete archive (trap)
+    K-->>A: result (strategy: depend)
 ```
 
-The archive contains `charts/anime-review` only. This is a temporary tar archive, not an OCI chart publication or signed Helm package. CI does not send raw Deployment YAML or clone the repository on the node. The control plane must have `/usr/local/bin/aws` and `/usr/local/bin/helm`.
+**Change something else than the image:** edit the chart or `values.yaml` and push to `main`. Add-ons, namespace, Secret and StorageClass are outside the release: rerun the relevant part of `bootstrap-cluster.sh`.
 
-The runner uploads `k8s-bootstrap/helm/CI_PIPELINE_ID/DEPLOY_SHA.tar.gz`, invokes SSM and polls up to 90 times with five-second sleeps (roughly 7.5 minutes plus API latency). A Helm operation, rollback and transfer may exceed that window. On timeout, inspect the existing SSM command before retrying. The EXIT trap attempts S3 deletion even on failure; hard cancellation may leave artifacts. On versioned buckets, deletion can leave earlier object versions for lifecycle cleanup. Remote temporary files are removed after successful completion; earlier errors can leave them behind.
+**Roll back:** revert the `CI/CD - update Helm values for …` commit and push. Check database schema compatibility first; Helm never rolls back data.
 
-`resource_group: anime-review-cluster` serializes deploy jobs in this project, not manual Helm operations, infra jobs or the tag-update jobs. Concurrent tag commits can still race. EC2 discovery selects the first running instance named `anime-review-control-plane`; ensure that target is unique.
+> [!WARNING]
+> **GitLab only: automatic bootstrap is not wired.** GitHub Actions handles `bootstrap_cluster`. On GitLab, anime-review-infra's `bootstrap_k8s` job triggers this project with `BOOTSTRAP_CLUSTER=true`, but the job that consumed it was dropped in commit `726bb49`, so the downstream pipeline has no job.
+>
+> Also note: the GitLab `update_manifests` job changes **tags only**. Since `values.yaml` now points to GHCR, a GitLab-only delivery deploys the GHCR image with the GitLab commit tag; it works because both platforms tag with the same short SHA, but only if GitHub built it. A proposal (the job as it existed before `726bb49`) is in [`docs/examples/bootstrap-job.gitlab-ci.yml.example`](docs/examples/bootstrap-job.gitlab-ci.yml.example): append it to `.gitlab-ci.yml`.
 
-### Updating more than images
+## Configuration and operations
 
-Commit chart values/templates to K8s `main`; the deployment job upgrades the whole chart, including Services, Ingress, policies and StatefulSet. Changes to add-ons, namespace, secrets and StorageClass remain separate operator actions. CI has no rendering/test job before upload: `helm lint` runs remotely immediately before upgrade.
+- [Values, identities and tokens](docs/CONFIGURATION.md)
+- [Diagnostics, backups, rollback](docs/OPERATIONS.md)
+- [Example Helm override](docs/examples/helm-values.yaml.example) · [operator shell variables](docs/examples/deployment.env.example)
+- [Diagrams](docs/assets/README.md) · the AWS side is shown in [03-kubernetes](docs/assets/03-kubernetes.png)
+
+## Known limits
+
+Single control plane and single PostgreSQL pod (no HA, no automated backup). No HPA. No TLS certificate: port 443 is forwarded but serves nothing useful. NetworkPolicies filter ingress only. This is push-based CD, not a GitOps controller: a manual `helm upgrade` is not reconciled back to Git.

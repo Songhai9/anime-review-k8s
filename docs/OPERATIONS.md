@@ -65,4 +65,4 @@ A controlled emergency `kubectl rollout undo` can revert a Deployment, but it do
 - The Ingress controller has its own spread constraint; that is not a property of every pod.
 - An ingress NetworkPolicy does not deny pod egress.
 - NLB TCP 443 does not itself provide a valid HTTPS certificate.
-- Git-versioned manifests plus CI running `kubectl apply` are not a continuously reconciling GitOps operator.
+- A Git-versioned chart plus CI running `helm upgrade` is push-based delivery, not a continuously reconciling GitOps operator.

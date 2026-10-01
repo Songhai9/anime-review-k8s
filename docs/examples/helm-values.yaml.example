@@ -1,0 +1,33 @@
+# Optional override file for a MANUAL Helm deployment.
+# Copy outside Git, edit, then:
+#   helm upgrade --install anime-review ./charts/anime-review -n anime-review \
+#     -f /root/anime-review-values.yaml --server-side=true --wait --rollback-on-failure --timeout 5m
+# CI never reads this file: for automated deliveries edit charts/anime-review/values.yaml instead.
+# No password here: the chart references the existing Secret postgres-secrets.
+
+backend:
+  replicaCount: 2
+  image:
+    repository: registry.gitlab.com/YOUR_GROUP/YOUR_APP/backend
+    tag: "REPLACE_SHORT_SHA"
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits:   { cpu: 300m, memory: 256Mi }
+
+frontend:
+  replicaCount: 1
+  image:
+    repository: registry.gitlab.com/YOUR_GROUP/YOUR_APP/frontend
+    tag: "REPLACE_SHORT_SHA"   # always the same tag as the backend
+
+postgres:
+  storage:
+    storageClass: gp3
+    size: 8Gi                  # changing it later does not resize an existing PVC
+
+ingress:
+  enabled: true
+  className: nginx
+
+networkPolicies:
+  enabled: true
